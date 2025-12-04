@@ -1,0 +1,5 @@
+{
+  "name": "Kernel Telemetry Visualizer",
+  "description": "A high-fidelity telemetry dashboard for engineering diagnostics, visualizing Drift, Stability, Boundary, and Oscillation kernels across PON, DOCSIS, FWA, MDU, and MESH domains.",
+  "requestFramePermissions": []
+}
