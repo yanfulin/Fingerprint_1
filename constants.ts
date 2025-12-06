@@ -93,4 +93,4 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
   { id: 'MESH-3', domain: Domain.MESH, title: 'Auto-Stabilization', description: 'Corrective actions (power, topology) impact.', kernelFocus: 'stability', primaryMetrics: ['backhaul_rssi_dBm'] },
 ];
 
-export const APP_PASSWORD = 'admin';
+export const APP_PASSWORD = 'ubeeadmin';
