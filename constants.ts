@@ -71,7 +71,7 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
   { id: 'PON-1', domain: Domain.PON, title: 'LOS Early Warning', description: 'Detect fiber aging / dirty connectors before failure.', kernelFocus: 'drift', primaryMetrics: ['rx_power_dBm', 'tx_bias_mA'] },
   { id: 'PON-2', domain: Domain.PON, title: 'Temperature-Driven Drift', description: 'Laser temp increases → bias rises → rx-power fluctuates.', kernelFocus: 'drift', primaryMetrics: ['laser_temp_C', 'tx_bias_mA'] },
   { id: 'PON-3', domain: Domain.PON, title: 'Splitter Imbalance', description: 'Abnormal drift profile on specific splitters.', kernelFocus: 'stability', primaryMetrics: ['rx_power_dBm'] },
-  
+
   // DOCSIS
   { id: 'DOC-1', domain: Domain.DOCSIS, title: 'Rogue Modem Signature', description: 'Detect abnormal periodic bursts.', kernelFocus: 'boundary', primaryMetrics: ['us_snr_dB', 'minislot_errors'] },
   { id: 'DOC-2', domain: Domain.DOCSIS, title: 'Periodic Ingress / Noise', description: 'Boundary kernel picks repeating noise intervals.', kernelFocus: 'boundary', primaryMetrics: ['minislot_errors'] },
@@ -92,3 +92,5 @@ export const DEMO_SCENARIOS: DemoScenario[] = [
   { id: 'MESH-2', domain: Domain.MESH, title: 'Backhaul Degradation', description: 'RSSI & throughput drift → predict collapse.', kernelFocus: 'drift', primaryMetrics: ['backhaul_rssi_dBm', 'backhaul_rate_Mbps'] },
   { id: 'MESH-3', domain: Domain.MESH, title: 'Auto-Stabilization', description: 'Corrective actions (power, topology) impact.', kernelFocus: 'stability', primaryMetrics: ['backhaul_rssi_dBm'] },
 ];
+
+export const APP_PASSWORD = 'admin';

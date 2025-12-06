@@ -5,8 +5,9 @@ import { generateHistoricalData } from './services/dataService';
 import { KernelConfigView } from './components/KernelConfigView';
 import { VisualizationPanel } from './components/VisualizationPanel';
 import { DataTable } from './components/DataTable';
-import { 
-  Network, Radio, Zap, Home, Wifi, 
+import { LoginPage } from './components/LoginPage';
+import {
+  Network, Radio, Zap, Home, Wifi,
   LayoutDashboard, Server, Settings, Activity
 } from 'lucide-react';
 
@@ -23,9 +24,10 @@ const DomainIcon = ({ domain, active }: { domain: Domain; active: boolean }) => 
 };
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [selectedDomain, setSelectedDomain] = useState<Domain>(Domain.PON);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>('');
-  
+
   // Set initial scenario when domain changes
   useEffect(() => {
     const firstScenario = DEMO_SCENARIOS.find(s => s.domain === selectedDomain);
@@ -34,21 +36,25 @@ export default function App() {
     }
   }, [selectedDomain]);
 
-  const activeScenario = useMemo(() => 
-    DEMO_SCENARIOS.find(s => s.id === selectedScenarioId) || DEMO_SCENARIOS[0], 
+  const activeScenario = useMemo(() =>
+    DEMO_SCENARIOS.find(s => s.id === selectedScenarioId) || DEMO_SCENARIOS[0],
     [selectedScenarioId]
   );
 
-  const historicalData = useMemo(() => 
-    generateHistoricalData(activeScenario), 
+  const historicalData = useMemo(() =>
+    generateHistoricalData(activeScenario),
     [activeScenario]
   );
 
   const domainScenarios = DEMO_SCENARIOS.filter(s => s.domain === selectedDomain);
 
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
+  }
+
   return (
     <div className="flex h-screen bg-slate-950 text-slate-200 overflow-hidden font-sans">
-      
+
       {/* Sidebar Navigation */}
       <aside className="w-64 border-r border-slate-800 bg-slate-900 flex flex-col">
         <div className="p-6 border-b border-slate-800">
@@ -65,47 +71,45 @@ export default function App() {
             <button
               key={d}
               onClick={() => setSelectedDomain(d)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all ${
-                selectedDomain === d 
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' 
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all ${selectedDomain === d
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20'
+                : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                }`}
             >
               <DomainIcon domain={d} active={selectedDomain === d} />
               {d}
             </button>
           ))}
-          
+
           <div className="mt-8 border-t border-slate-800 pt-4">
-             <button className="w-full flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white text-sm">
-                <Settings size={18} /> Configuration
-             </button>
+            <button className="w-full flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white text-sm">
+              <Settings size={18} /> Configuration
+            </button>
           </div>
         </nav>
       </aside>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        
+
         {/* Top Header / Scenario Selector */}
         <header className="h-16 border-b border-slate-800 bg-slate-900/50 backdrop-blur flex items-center px-6 justify-between">
           <div className="flex items-center gap-4">
-             <span className="text-slate-400 text-sm font-mono">SCENARIO:</span>
-             <div className="flex bg-slate-800 rounded-lg p-1">
-               {domainScenarios.map(sc => (
-                 <button
-                   key={sc.id}
-                   onClick={() => setSelectedScenarioId(sc.id)}
-                   className={`px-4 py-1.5 text-xs font-medium rounded-md transition-all ${
-                     selectedScenarioId === sc.id
-                       ? 'bg-slate-600 text-white shadow-sm'
-                       : 'text-slate-400 hover:text-slate-200'
-                   }`}
-                 >
-                   {sc.title}
-                 </button>
-               ))}
-             </div>
+            <span className="text-slate-400 text-sm font-mono">SCENARIO:</span>
+            <div className="flex bg-slate-800 rounded-lg p-1">
+              {domainScenarios.map(sc => (
+                <button
+                  key={sc.id}
+                  onClick={() => setSelectedScenarioId(sc.id)}
+                  className={`px-4 py-1.5 text-xs font-medium rounded-md transition-all ${selectedScenarioId === sc.id
+                    ? 'bg-slate-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                >
+                  {sc.title}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -116,25 +120,25 @@ export default function App() {
         {/* Dashboard Content */}
         <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
           <div className="max-w-7xl mx-auto">
-            
+
             {/* 1. Kernel Config View (Read-Only) */}
-            <KernelConfigView 
-              config={DOMAIN_CONFIGS[selectedDomain]} 
-              domain={selectedDomain} 
+            <KernelConfigView
+              config={DOMAIN_CONFIGS[selectedDomain]}
+              domain={selectedDomain}
             />
 
             {/* 2. Primary Visualization (The "Picture") */}
-            <VisualizationPanel 
-              data={historicalData} 
-              scenario={activeScenario} 
+            <VisualizationPanel
+              data={historicalData}
+              scenario={activeScenario}
             />
 
             {/* 3. Historical Data Grid */}
-            <DataTable 
-              data={historicalData} 
-              metrics={activeScenario.primaryMetrics} 
+            <DataTable
+              data={historicalData}
+              metrics={activeScenario.primaryMetrics}
             />
-            
+
             <div className="h-12"></div> {/* Spacer */}
           </div>
         </div>
