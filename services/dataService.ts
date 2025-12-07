@@ -62,14 +62,14 @@ export const generateHistoricalData = (scenario: DemoScenario): TelemetryPoint[]
     }
     // FWA-3: Handover (ID Switch)
     else if (scenario.id === 'FWA-3') {
-       // Flap every 30 samples
-       if (Math.sin(i * 0.1) > 0) {
-         cell_id = "Cell_101";
-         rsrp_dBm = -90 + noise;
-       } else {
-         cell_id = "Cell_205";
-         rsrp_dBm = -92 + noise;
-       }
+      // Flap every 30 samples
+      if (Math.sin(i * 0.1) > 0) {
+        cell_id = "Cell_101";
+        rsrp_dBm = -90 + noise;
+      } else {
+        cell_id = "Cell_205";
+        rsrp_dBm = -92 + noise;
+      }
     }
     // MDU-1: Weak Units (Low values)
     else if (scenario.id === 'MDU-1') {
@@ -111,9 +111,126 @@ export const generateHistoricalData = (scenario: DemoScenario): TelemetryPoint[]
       retry_rate: parseFloat(retry_rate.toFixed(3)),
       backhaul_rssi_dBm: parseFloat(backhaul_rssi_dBm.toFixed(2)),
       parent_id,
-      cell_id,
-      mesh_hops
     });
+  }
+
+  return points;
+};
+
+// --- Flexible Data Generator ---
+
+export type DataPattern = 'constant' | 'linear' | 'sine' | 'random' | 'categorical' | 'spike';
+
+export interface FieldGenConfig {
+  pattern: DataPattern;
+  initial: number | string;
+  // Common
+  noise?: number;
+  // Linear
+  slope?: number; // per step
+  // Sine
+  amplitude?: number;
+  period?: number; // in steps
+  phase?: number;
+  // Categorical
+  options?: any[];
+  switchProb?: number;
+  // Spike
+  spikeProb?: number;
+  spikeVal?: number | [number, number]; // value or range
+}
+
+export interface DataGenConfig {
+  sampleCount: number;
+  intervalMs: number;
+  fields: { [key: string]: FieldGenConfig };
+}
+
+/**
+ * Generates data based on a configuration object.
+ * Allows full control over the variables for each field.
+ */
+export const generateFlexibleData = (config: DataGenConfig): TelemetryPoint[] => {
+  const now = Date.now();
+  const points: TelemetryPoint[] = [];
+  const { sampleCount, intervalMs, fields } = config;
+
+  // Initialize current state
+  let currentState: { [key: string]: any } = {};
+  Object.keys(fields).forEach(k => {
+    currentState[k] = fields[k].initial;
+  });
+
+  for (let i = 0; i < sampleCount; i++) {
+    const time = now - (sampleCount - i) * intervalMs;
+    const point: TelemetryPoint = { timestamp: time };
+
+    Object.keys(fields).forEach(key => {
+      const cfg = fields[key];
+      let val = currentState[key]; // From previous step (or initial)
+
+      // Calculate base value based on pattern
+      if (cfg.pattern === 'constant') {
+        val = cfg.initial;
+      }
+      else if (cfg.pattern === 'linear') {
+        // Deterministic linear trend: use index or accumulate without noise?
+        // Let's use accumulation on the 'clean' value to ensure slope is exact.
+        // If we want random walk, we'd need another pattern.
+        // Here: currentState holds the CLEAN value.
+        val = (val as number) + (cfg.slope || 0);
+        currentState[key] = val;
+      }
+      else if (cfg.pattern === 'sine') {
+        const amp = cfg.amplitude || 10;
+        const per = cfg.period || 50;
+        const phase = cfg.phase || 0;
+        const base = (cfg.initial as number);
+        // Sine is stateless relative to 'i', so we ignore currentState usually, 
+        // unless we want to combine. Let's keep it simple: f(t).
+        val = base + Math.sin(((i + phase) * 2 * Math.PI) / per) * amp;
+      }
+      else if (cfg.pattern === 'random') {
+        // Independent random around initial
+        val = (cfg.initial as number);
+      }
+      else if (cfg.pattern === 'categorical') {
+        // Stateful switch
+        if (cfg.options && cfg.options.length > 0) {
+          if (Math.random() < (cfg.switchProb || 0.1)) {
+            const idx = Math.floor(Math.random() * cfg.options.length);
+            val = cfg.options[idx];
+          }
+        }
+        currentState[key] = val;
+      }
+      else if (cfg.pattern === 'spike') {
+        val = cfg.initial;
+        if (Math.random() < (cfg.spikeProb || 0.01)) {
+          if (Array.isArray(cfg.spikeVal)) {
+            val = cfg.spikeVal[0] + Math.random() * (cfg.spikeVal[1] - cfg.spikeVal[0]);
+          } else {
+            // @ts-ignore
+            val = cfg.spikeVal || 0;
+          }
+        }
+      }
+
+      // Add Noise (Numeric only)
+      let finalVal = val;
+      if (typeof val === 'number' && cfg.noise) {
+        finalVal += (Math.random() - 0.5) * 2 * cfg.noise;
+      }
+
+      // Store in point
+      if (typeof finalVal === 'number') {
+        point[key] = parseFloat(finalVal.toFixed(2));
+      } else {
+        point[key] = finalVal;
+      }
+    });
+
+    points.push(point);
   }
 
   return points;
