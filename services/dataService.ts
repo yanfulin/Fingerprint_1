@@ -117,6 +117,22 @@ export const generateHistoricalData = (scenario: DemoScenario): TelemetryPoint[]
   return points;
 };
 
+/**
+ * Calculates a drift score based on the deviation from a baseline.
+ * Uses a simplified Z-score approach: |val - mean| / (stdDev + epsilon)
+ * Normalized to be roughly 0-1 for visualization, but can go higher.
+ */
+export const calculateDrift = (value: number, baselineMean: number, baselineStdDev: number = 1): number => {
+  // Avoid division by zero
+  const safeStdDev = baselineStdDev === 0 ? 1 : baselineStdDev;
+  const zScore = Math.abs((value - baselineMean) / safeStdDev);
+
+  // Scale for display: e.g., Z-score of 3 is "Critical" (approx 1.0 score)
+  // This is arbitrary for the demo to match the 0.0 - 1.0 range expected by the UI thresholds
+  return parseFloat((zScore / 3).toFixed(3));
+};
+
+
 // --- Flexible Data Generator ---
 
 export type DataPattern = 'constant' | 'linear' | 'sine' | 'random' | 'categorical' | 'spike';
