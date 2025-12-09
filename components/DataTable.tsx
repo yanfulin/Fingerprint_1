@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { TelemetryPoint } from '../types';
-import { calculateDrift } from '../services/dataService';
+import { analyzePoint, KernelResult } from '../services/dataService';
 import { ArrowUp, ArrowDown, ArrowUpDown, Search } from 'lucide-react';
 
 interface Props {
@@ -50,6 +50,26 @@ export const DataTable: React.FC<Props> = ({ data, metrics }) => {
     return result;
   }, [data, filter, sortKey, sortDirection, metrics]);
 
+  // Pre-calculate analysis for all points to ensure consistency
+  const analysisMap = useMemo(() => {
+    const map = new Map<number, KernelResult | null>();
+    if (!metrics[0] || !data.length) return map;
+
+    // We need the data in chronological order (Oldest -> Newest) for correct windowing
+    // Assuming data passed in is roughly chronological or reverse.
+    // Let's sort a copy to be safe for the analysis loop
+    const sortedData = [...data].sort((a, b) => a.timestamp - b.timestamp);
+    const primaryKey = metrics[0];
+    const series = sortedData.map(d => typeof d[primaryKey] === 'number' ? d[primaryKey] : 0);
+
+    sortedData.forEach((point, idx) => {
+      const result = analyzePoint(series, idx);
+      map.set(point.timestamp, result);
+    });
+
+    return map;
+  }, [data, metrics]);
+
   const handleSort = (key: string) => {
     if (sortKey === key) {
       setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -58,18 +78,6 @@ export const DataTable: React.FC<Props> = ({ data, metrics }) => {
       setSortDirection('desc'); // Default to descending for new columns (better for values/dates)
     }
   };
-
-  const stats = useMemo(() => {
-    if (!data.length || !metrics[0]) return { mean: 0, stdDev: 1 };
-    const key = metrics[0];
-    const values = data.map(d => d[key]).filter(v => typeof v === 'number') as number[];
-    if (!values.length) return { mean: 0, stdDev: 1 };
-
-    const sum = values.reduce((a, b) => a + b, 0);
-    const mean = sum / values.length;
-    const variance = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length;
-    return { mean, stdDev: Math.sqrt(variance) };
-  }, [data, metrics]);
 
   const SortIcon = ({ column }: { column: string }) => {
     if (sortKey !== column) return <ArrowUpDown size={14} className="text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity" />;
@@ -124,7 +132,10 @@ export const DataTable: React.FC<Props> = ({ data, metrics }) => {
                 </th>
               ))}
               <th className="px-4 py-3 font-semibold text-slate-300 border-b border-slate-700 cursor-default">
-                Drift Score
+                Drift Level
+              </th>
+              <th className="px-4 py-3 font-semibold text-slate-300 border-b border-slate-700 cursor-default">
+                Risk Level
               </th>
             </tr>
           </thead>
@@ -143,32 +154,54 @@ export const DataTable: React.FC<Props> = ({ data, metrics }) => {
                   ))}
                   <td className="px-4 py-2">
                     {(() => {
-                      // Calculate drift based on the first metric available
-                      const primaryMetric = metrics[0];
-                      if (!primaryMetric || typeof row[primaryMetric] !== 'number') return <span className="text-slate-600">-</span>;
+                      const analysis = analysisMap.get(row.timestamp);
+                      if (!analysis) return <span className="text-slate-600 text-xs italic">-</span>;
 
-                      // Simple baseline stats from the visible data (in a real app, these would be historical baselines)
-                      // We use memoized values if we could, but for now let's just use a simple heuristic
-                      // or pre-calculate these outside the map. 
-                      // optimization: Pre-calculating this inside the component body before return would be better.
+                      const isDriftHigh = analysis.driftScore > 0.15;
+                      return (
+                        <div className="flex flex-col">
+                          <span className={`font-mono font-bold ${isDriftHigh ? 'text-amber-400' : 'text-slate-400'}`}>
+                            {analysis.driftScore.toFixed(3)}
+                          </span>
+                          <span className="text-[10px] text-slate-500 uppercase">
+                            {analysis.driftStatus.replace('_DRIFT', '')}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-4 py-2">
+                    {(() => {
+                      const analysis = analysisMap.get(row.timestamp);
+                      if (!analysis) return <span className="text-slate-600 text-xs italic">Pending...</span>;
 
-                      // actually, let's use the values passed down or calculate them once. 
-                      // Since we are inside the map, we can't easily do it efficiently without pre-calc.
-                      // Let's assume the component will calculate stats above.
-
-                      const val = row[primaryMetric];
-                      const score = calculateDrift(val, stats.mean, stats.stdDev);
-
-                      return score > 0.6 ?
-                        <span className="text-red-400 font-bold">{score.toFixed(2)}</span> :
-                        (score > 0.3 ? <span className="text-amber-400">{score.toFixed(2)}</span> : <span className="text-emerald-500">{score.toFixed(2)}</span>);
+                      return (
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className={`font-bold px-2 py-0.5 rounded text-[10px] tracking-wider ${analysis.overallRisk === 'HIGH' ? 'bg-red-900/30 text-red-400 border border-red-900' :
+                              analysis.overallRisk === 'MEDIUM' ? 'bg-amber-900/30 text-amber-400 border border-amber-900' : 'bg-emerald-900/30 text-emerald-400 border border-emerald-900'
+                              }`}>
+                              {analysis.overallRisk}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 uppercase tracking-tight flex gap-2 mt-1">
+                            {analysis.oscillationLevel !== 'LOW' && <span className="text-purple-400 font-semibold" title="Oscillation">OSC</span>}
+                            {analysis.boundaryStatus !== 'NO' && <span className="text-orange-400 font-semibold" title="Boundary Hit">BND</span>}
+                            {analysis.stabilityStatus !== 'GOOD' && <span className="text-blue-400 font-semibold" title="Stability">STB</span>}
+                            {analysis.overallRisk === 'LOW' && analysis.oscillationLevel === 'LOW' && analysis.boundaryStatus === 'NO' && analysis.stabilityStatus === 'GOOD' &&
+                              <span className="text-slate-600">-</span>
+                            }
+                          </div>
+                        </div>
+                      );
                     })()}
                   </td>
                 </tr>
               ))
             ) : (
+
               <tr>
-                <td colSpan={metrics.length + 2} className="px-4 py-8 text-center text-slate-500 italic">
+                <td colSpan={metrics.length + 3} className="px-4 py-8 text-center text-slate-500 italic">
                   No matching records found.
                 </td>
               </tr>

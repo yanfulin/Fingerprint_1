@@ -117,19 +117,170 @@ export const generateHistoricalData = (scenario: DemoScenario): TelemetryPoint[]
   return points;
 };
 
-/**
- * Calculates a drift score based on the deviation from a baseline.
- * Uses a simplified Z-score approach: |val - mean| / (stdDev + epsilon)
- * Normalized to be roughly 0-1 for visualization, but can go higher.
- */
-export const calculateDrift = (value: number, baselineMean: number, baselineStdDev: number = 1): number => {
-  // Avoid division by zero
-  const safeStdDev = baselineStdDev === 0 ? 1 : baselineStdDev;
-  const zScore = Math.abs((value - baselineMean) / safeStdDev);
+// ==========================================
+// FP KERNEL MATH (Ported from Reference)
+// ==========================================
 
-  // Scale for display: e.g., Z-score of 3 is "Critical" (approx 1.0 score)
-  // This is arbitrary for the demo to match the 0.0 - 1.0 range expected by the UI thresholds
-  return parseFloat((zScore / 3).toFixed(3));
+export type DriftStatus = "STABLE" | "MILD_DRIFT" | "MODERATE_DRIFT" | "SEVERE_DRIFT";
+export type StabilityStatus = "GOOD" | "MARGINAL" | "UNSTABLE";
+export type BoundaryStatus = "YES" | "WARNING" | "NO";
+export type OscillationLevel = "LOW" | "MEDIUM" | "HIGH";
+export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
+
+export interface KernelResult {
+  driftScore: number;
+  driftStatus: DriftStatus;
+  stabilityScore: number;
+  stabilityStatus: StabilityStatus;
+  boundaryStatus: BoundaryStatus;
+  oscillationLevel: OscillationLevel;
+  overallRisk: RiskLevel;
+}
+
+const mean = (vals: number[]) => vals.reduce((a, b) => a + b, 0) / vals.length;
+const max = (vals: number[]) => Math.max(...vals);
+const min = (vals: number[]) => Math.min(...vals);
+
+// 1. Drift
+export const computeDrift = (longWindow: number[], shortWindow: number[], eps = 1e-6) => {
+  const muLong = mean(longWindow);
+  const muShort = mean(shortWindow);
+  const rangeLong = max(longWindow) - min(longWindow);
+
+  // Avoid division by zero if range is 0 (flatline) using eps
+  return Math.abs(muShort - muLong) / (2 * rangeLong + eps);
+};
+
+export const judgeDrift = (score: number): DriftStatus => {
+  if (score < 0.05) return "STABLE";
+  if (score < 0.15) return "MILD_DRIFT";
+  if (score < 0.30) return "MODERATE_DRIFT";
+  return "SEVERE_DRIFT";
+};
+
+// 2. Stability
+export const computeStability = (shortWindow: number[], eps = 1e-6) => {
+  if (shortWindow.length < 2) return 0.0;
+  const mu = mean(shortWindow);
+  const variance = shortWindow.reduce((acc, val) => acc + Math.pow(val - mu, 2), 0) / shortWindow.length;
+  const sigma = Math.sqrt(variance);
+  const rng = max(shortWindow) - min(shortWindow);
+
+  return sigma / (3 * rng + eps);
+};
+
+export const judgeStability = (score: number): StabilityStatus => {
+  if (score < 0.08) return "GOOD";
+  if (score < 0.20) return "MARGINAL";
+  return "UNSTABLE";
+};
+
+// 3. Boundary
+export const computeBoundaryHit = (vals: number[], threshold = 30.0, margin = 20.0): BoundaryStatus => {
+  const maxVal = max(vals);
+  if (maxVal > threshold) return "YES";
+  if (maxVal > margin) return "WARNING";
+  return "NO";
+};
+
+// 4. Oscillation
+export const computeOscillation = (vals: number[]): OscillationLevel => {
+  if (vals.length < 3) return "LOW";
+
+  const diffs: number[] = [];
+  for (let i = 0; i < vals.length - 1; i++) {
+    diffs.push(vals[i + 1] - vals[i]);
+  }
+
+  const sign = (x: number) => x > 0 ? 1 : (x < 0 ? -1 : 0);
+  const signs = diffs.map(sign).filter(s => s !== 0);
+
+  if (signs.length < 2) return "LOW";
+
+  let changes = 0;
+  for (let i = 0; i < signs.length - 1; i++) {
+    if (signs[i] * signs[i + 1] < 0) changes++;
+  }
+
+  if (changes === 0) return "LOW";
+  if (changes <= 2) return "MEDIUM";
+  return "HIGH";
+};
+
+// 5. Overall Risk
+export const computeRisk = (
+  driftScore: number,
+  stability: StabilityStatus,
+  boundary: BoundaryStatus,
+  oscillation: OscillationLevel
+): RiskLevel => {
+  let score = 0;
+
+  if (boundary === "YES") score += 2;
+  else if (boundary === "WARNING") score += 1;
+
+  if (driftScore > 0.30) score += 2;
+  else if (driftScore > 0.15) score += 1;
+
+  if (stability === "UNSTABLE") score += 2;
+  else if (stability === "MARGINAL") score += 1;
+
+  if (oscillation === "HIGH") score += 2;
+  else if (oscillation === "MEDIUM") score += 1;
+
+  if (score <= 2) return "LOW";
+  if (score <= 4) return "MEDIUM";
+  return "HIGH";
+};
+
+/**
+ * Main Analysis Function
+ * Calculates metrics for a specific point in time by looking at the windows ending at that point.
+ */
+export const analyzePoint = (
+  fullSeries: number[],
+  currentIndex: number,
+  longSize: number = 20,
+  shortSize: number = 5
+): KernelResult | null => {
+  // Basic validation
+  if (currentIndex < 0 || currentIndex >= fullSeries.length) return null;
+  if (fullSeries.length < longSize) return null;
+
+  // Define Windows
+  // Long Window = Baseline (first N samples)
+  const longWindow = fullSeries.slice(0, longSize);
+
+  // Short Window = Current context (ending at currentIndex)
+  // Ensure we have enough data precedent to currentIndex
+  const startIndex = currentIndex - shortSize + 1;
+  if (startIndex < 0) return null; // Not enough history for this point
+
+  const shortWindow = fullSeries.slice(startIndex, currentIndex + 1);
+
+  const driftScore = computeDrift(longWindow, shortWindow);
+  const driftStatus = judgeDrift(driftScore);
+
+  const stabilityScore = computeStability(shortWindow);
+  const stabilityStatus = judgeStability(stabilityScore);
+
+  // Note: Thresholds strictly from prompt default (30, 20). 
+  // In production, pass these in via config.
+  const boundaryStatus = computeBoundaryHit(shortWindow, 30.0, 20.0);
+
+  const oscillationLevel = computeOscillation(shortWindow);
+
+  const overallRisk = computeRisk(driftScore, stabilityStatus, boundaryStatus, oscillationLevel);
+
+  return {
+    driftScore,
+    driftStatus,
+    stabilityScore,
+    stabilityStatus,
+    boundaryStatus,
+    oscillationLevel,
+    overallRisk
+  };
 };
 
 
