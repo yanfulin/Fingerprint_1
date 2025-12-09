@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, ReferenceLine, Legend, Brush
 } from 'recharts';
 import { TelemetryPoint, DemoScenario } from '../types';
@@ -32,7 +32,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export const VisualizationPanel: React.FC<Props> = ({ data, scenario }) => {
   const metrics = scenario.primaryMetrics;
-  
+
   // State to track which metrics are hidden via the legend toggle
   const [hiddenMetrics, setHiddenMetrics] = useState<Set<string>>(new Set());
 
@@ -40,6 +40,23 @@ export const VisualizationPanel: React.FC<Props> = ({ data, scenario }) => {
   useEffect(() => {
     setHiddenMetrics(new Set());
   }, [scenario.id]);
+
+  // Calculate Rolling Average Series
+  const dataWithRollingAvg = useMemo(() => {
+    return data.map((point, index, array) => {
+      // Get slice of last 20 points (including current)
+      const start = Math.max(0, index - 19);
+      const window = array.slice(start, index + 1);
+
+      const sum = window.reduce((acc, p) => acc + (p.driftScore || 0), 0);
+      const avg = sum / window.length;
+
+      return {
+        ...point,
+        rollingDrift: avg
+      };
+    });
+  }, [data]);
 
   const handleLegendClick = (e: any) => {
     const { dataKey } = e;
@@ -53,7 +70,7 @@ export const VisualizationPanel: React.FC<Props> = ({ data, scenario }) => {
       return next;
     });
   };
-  
+
   // Decide chart type based on kernel focus
   const isOscillation = scenario.kernelFocus === 'oscillation';
   const isBoundary = scenario.kernelFocus === 'boundary';
@@ -63,9 +80,9 @@ export const VisualizationPanel: React.FC<Props> = ({ data, scenario }) => {
     height: 30,
     stroke: "#475569",
     fill: "#1e293b",
-    tickFormatter: (t: number) => new Date(t).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+    tickFormatter: (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     travellerWidth: 10,
-    tick: { fontSize: 10, fill: "#94a3b8" } 
+    tick: { fontSize: 10, fill: "#94a3b8" }
   };
 
   return (
@@ -82,97 +99,97 @@ export const VisualizationPanel: React.FC<Props> = ({ data, scenario }) => {
         </div>
       </div>
 
-      <div className="h-[400px] w-full">
+      <div className="h-[400px] w-full mb-8">
         <ResponsiveContainer width="100%" height="100%">
           {isOscillation && typeof data[0]?.[metrics[0]] === 'string' ? (
-             /* Oscillation Chart for Categorical (State) data like ID */
-            <LineChart data={data}>
+            /* Oscillation Chart for Categorical (State) data like ID */
+            <LineChart data={data} syncId="kernelSync">
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
-              <XAxis 
-                dataKey="timestamp" 
-                tickFormatter={(t) => new Date(t).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})} 
+              <XAxis
+                dataKey="timestamp"
+                tickFormatter={(t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                 stroke="#64748b"
-                tick={{fontSize: 12}}
+                tick={{ fontSize: 12 }}
               />
-              <YAxis type="category" dataKey={metrics[0]} stroke="#64748b" tick={{fontSize: 12}} />
-              {metrics[1] && <YAxis yAxisId="right" orientation="right" stroke="#64748b" tick={{fontSize: 12}} />}
-              
+              <YAxis type="category" dataKey={metrics[0]} stroke="#64748b" tick={{ fontSize: 12 }} />
+              {metrics[1] && <YAxis yAxisId="right" orientation="right" stroke="#64748b" tick={{ fontSize: 12 }} />}
+
               <Tooltip content={<CustomTooltip />} />
               <Legend onClick={handleLegendClick} wrapperStyle={{ cursor: 'pointer' }} />
               <Brush {...brushProps} y={360} />
-              
-              <Line 
-                type="step" 
-                dataKey={metrics[0]} 
-                stroke="#a78bfa" 
-                strokeWidth={2} 
-                dot={false} 
+
+              <Line
+                type="step"
+                dataKey={metrics[0]}
+                stroke="#a78bfa"
+                strokeWidth={2}
+                dot={false}
                 animationDuration={500}
                 hide={hiddenMetrics.has(metrics[0])}
               />
               {metrics[1] && (
-                <Line 
-                  type="step" 
-                  yAxisId="right" 
-                  dataKey={metrics[1]} 
-                  stroke="#38bdf8" 
-                  strokeDasharray="3 3" 
+                <Line
+                  type="step"
+                  yAxisId="right"
+                  dataKey={metrics[1]}
+                  stroke="#38bdf8"
+                  strokeDasharray="3 3"
                   hide={hiddenMetrics.has(metrics[1])}
                 />
               )}
             </LineChart>
           ) : (
             /* Standard Numerical Chart (Drift/Stability/Boundary) */
-            <AreaChart data={data}>
+            <AreaChart data={data} syncId="kernelSync">
               <defs>
                 <linearGradient id="colorMetric1" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="colorMetric2" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#f43f5e" stopOpacity={0}/>
+                  <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} vertical={false} />
-              <XAxis 
-                dataKey="timestamp" 
-                tickFormatter={(t) => new Date(t).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 
+              <XAxis
+                dataKey="timestamp"
+                tickFormatter={(t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 stroke="#64748b"
-                tick={{fontSize: 11}}
+                tick={{ fontSize: 11 }}
                 minTickGap={30}
               />
-              <YAxis stroke="#64748b" tick={{fontSize: 11}} domain={['auto', 'auto']} />
+              <YAxis stroke="#64748b" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
               <Tooltip content={<CustomTooltip />} />
-              <Legend 
-                verticalAlign="top" 
-                height={36} 
+              <Legend
+                verticalAlign="top"
+                height={36}
                 iconType="circle"
                 onClick={handleLegendClick}
                 wrapperStyle={{ cursor: 'pointer', userSelect: 'none' }}
               />
               <Brush {...brushProps} />
 
-              <Area 
-                type="monotone" 
-                dataKey={metrics[0]} 
-                stroke="#3b82f6" 
+              <Area
+                type="monotone"
+                dataKey={metrics[0]}
+                stroke="#3b82f6"
                 strokeWidth={2}
-                fillOpacity={1} 
-                fill="url(#colorMetric1)" 
+                fillOpacity={1}
+                fill="url(#colorMetric1)"
                 animationDuration={1000}
                 isAnimationActive={true}
                 hide={hiddenMetrics.has(metrics[0])}
               />
-              
+
               {metrics[1] && (
-                <Area 
-                  type="monotone" 
-                  dataKey={metrics[1]} 
-                  stroke="#f43f5e" 
+                <Area
+                  type="monotone"
+                  dataKey={metrics[1]}
+                  stroke="#f43f5e"
                   strokeWidth={2}
-                  fillOpacity={1} 
-                  fill="url(#colorMetric2)" 
+                  fillOpacity={1}
+                  fill="url(#colorMetric2)"
                   animationDuration={1000}
                   isAnimationActive={true}
                   hide={hiddenMetrics.has(metrics[1])}
@@ -185,6 +202,86 @@ export const VisualizationPanel: React.FC<Props> = ({ data, scenario }) => {
               )}
             </AreaChart>
           )}
+        </ResponsiveContainer>
+      </div>
+
+      {/* --- DRIFT LEVEL CHART --- */}
+      <h3 className="text-sm font-bold text-slate-400 mb-2 uppercase tracking-wide">Drift Level</h3>
+      <div className="h-[200px] w-full mb-6 bg-slate-900/50 rounded border border-slate-700/50 p-2">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={dataWithRollingAvg} syncId="kernelSync">
+            <defs>
+              <linearGradient id="colorDrift" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#fbbf24" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} vertical={false} />
+            <XAxis dataKey="timestamp" hide />
+            <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={[0, 'auto']} />
+            <Tooltip content={<CustomTooltip />} />
+            <Area
+              type="monotone"
+              dataKey="driftScore"
+              stroke="#fbbf24"
+              fill="url(#colorDrift)"
+              strokeWidth={2}
+              name="Drift Score"
+            />
+            {/* Threshold Lines */}
+            <ReferenceLine y={0.15} stroke="#fcd34d" strokeDasharray="3 3" />
+            <ReferenceLine y={0.30} stroke="#f59e0b" strokeDasharray="3 3" />
+
+            {/* Average Line */}
+            {/* Rolling Average Line */}
+            <Area
+              type="monotone"
+              dataKey="rollingDrift"
+              stroke="#e2e8f0"
+              fill="transparent"
+              strokeWidth={2}
+              strokeDasharray="5 5"
+              name="Rolling Avg (20)"
+              isAnimationActive={false}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* --- RISK LEVEL CHART --- */}
+      <h3 className="text-sm font-bold text-slate-400 mb-2 uppercase tracking-wide">Risk Level</h3>
+      <div className="h-[200px] w-full bg-slate-900/50 rounded border border-slate-700/50 p-2">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} syncId="kernelSync">
+            <defs>
+              <linearGradient id="colorRisk" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#f87171" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#f87171" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} vertical={false} />
+            <XAxis
+              dataKey="timestamp"
+              tickFormatter={(t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              stroke="#64748b"
+              tick={{ fontSize: 11 }}
+            />
+            <YAxis
+              stroke="#64748b"
+              tick={{ fontSize: 10 }}
+              domain={[0, 100]}
+              ticks={[0, 50, 100]}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Area
+              type="stepPost"
+              dataKey="riskScore"
+              stroke="#f87171"
+              fill="url(#colorRisk)"
+              strokeWidth={2}
+              name="Risk Score"
+            />
+          </AreaChart>
         </ResponsiveContainer>
       </div>
     </div>

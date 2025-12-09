@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { TelemetryPoint } from '../types';
-import { analyzePoint, KernelResult } from '../services/dataService';
 import { ArrowUp, ArrowDown, ArrowUpDown, Search } from 'lucide-react';
 
 interface Props {
@@ -51,24 +50,7 @@ export const DataTable: React.FC<Props> = ({ data, metrics }) => {
   }, [data, filter, sortKey, sortDirection, metrics]);
 
   // Pre-calculate analysis for all points to ensure consistency
-  const analysisMap = useMemo(() => {
-    const map = new Map<number, KernelResult | null>();
-    if (!metrics[0] || !data.length) return map;
-
-    // We need the data in chronological order (Oldest -> Newest) for correct windowing
-    // Assuming data passed in is roughly chronological or reverse.
-    // Let's sort a copy to be safe for the analysis loop
-    const sortedData = [...data].sort((a, b) => a.timestamp - b.timestamp);
-    const primaryKey = metrics[0];
-    const series = sortedData.map(d => typeof d[primaryKey] === 'number' ? d[primaryKey] : 0);
-
-    sortedData.forEach((point, idx) => {
-      const result = analyzePoint(series, idx);
-      map.set(point.timestamp, result);
-    });
-
-    return map;
-  }, [data, metrics]);
+  // (MOVED TO App.tsx) -> analysisMap removed.
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
@@ -154,17 +136,20 @@ export const DataTable: React.FC<Props> = ({ data, metrics }) => {
                   ))}
                   <td className="px-4 py-2">
                     {(() => {
-                      const analysis = analysisMap.get(row.timestamp);
-                      if (!analysis) return <span className="text-slate-600 text-xs italic">-</span>;
+                      // Pre-calculated in App.tsx
+                      const driftScore = row.driftScore as number;
+                      const driftStatus = row.driftStatus as string;
 
-                      const isDriftHigh = analysis.driftScore > 0.15;
+                      if (driftScore === undefined || !driftStatus) return <span className="text-slate-600 text-xs italic">-</span>;
+
+                      const isDriftHigh = driftScore > 0.15;
                       return (
                         <div className="flex flex-col">
                           <span className={`font-mono font-bold ${isDriftHigh ? 'text-amber-400' : 'text-slate-400'}`}>
-                            {analysis.driftScore.toFixed(3)}
+                            {driftScore.toFixed(3)}
                           </span>
                           <span className="text-[10px] text-slate-500 uppercase">
-                            {analysis.driftStatus.replace('_DRIFT', '')}
+                            {driftStatus.replace('_DRIFT', '')}
                           </span>
                         </div>
                       );
@@ -172,23 +157,27 @@ export const DataTable: React.FC<Props> = ({ data, metrics }) => {
                   </td>
                   <td className="px-4 py-2">
                     {(() => {
-                      const analysis = analysisMap.get(row.timestamp);
-                      if (!analysis) return <span className="text-slate-600 text-xs italic">Pending...</span>;
+                      const overallRisk = row.overallRisk as string;
+                      if (!overallRisk) return <span className="text-slate-600 text-xs italic">Pending...</span>;
+
+                      const oscillationLevel = row.oscillationLevel as string;
+                      const boundaryStatus = row.boundaryStatus as string;
+                      const stabilityStatus = row.stabilityStatus as string;
 
                       return (
                         <div className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-2 text-xs">
-                            <span className={`font-bold px-2 py-0.5 rounded text-[10px] tracking-wider ${analysis.overallRisk === 'HIGH' ? 'bg-red-900/30 text-red-400 border border-red-900' :
-                              analysis.overallRisk === 'MEDIUM' ? 'bg-amber-900/30 text-amber-400 border border-amber-900' : 'bg-emerald-900/30 text-emerald-400 border border-emerald-900'
+                            <span className={`font-bold px-2 py-0.5 rounded text-[10px] tracking-wider ${overallRisk === 'HIGH' ? 'bg-red-900/30 text-red-400 border border-red-900' :
+                              overallRisk === 'MEDIUM' ? 'bg-amber-900/30 text-amber-400 border border-amber-900' : 'bg-emerald-900/30 text-emerald-400 border border-emerald-900'
                               }`}>
-                              {analysis.overallRisk}
+                              {overallRisk}
                             </span>
                           </div>
                           <div className="text-[10px] text-slate-500 uppercase tracking-tight flex gap-2 mt-1">
-                            {analysis.oscillationLevel !== 'LOW' && <span className="text-purple-400 font-semibold" title="Oscillation">OSC</span>}
-                            {analysis.boundaryStatus !== 'NO' && <span className="text-orange-400 font-semibold" title="Boundary Hit">BND</span>}
-                            {analysis.stabilityStatus !== 'GOOD' && <span className="text-blue-400 font-semibold" title="Stability">STB</span>}
-                            {analysis.overallRisk === 'LOW' && analysis.oscillationLevel === 'LOW' && analysis.boundaryStatus === 'NO' && analysis.stabilityStatus === 'GOOD' &&
+                            {oscillationLevel !== 'LOW' && <span className="text-purple-400 font-semibold" title="Oscillation">OSC</span>}
+                            {boundaryStatus !== 'NO' && <span className="text-orange-400 font-semibold" title="Boundary Hit">BND</span>}
+                            {stabilityStatus !== 'GOOD' && <span className="text-blue-400 font-semibold" title="Stability">STB</span>}
+                            {overallRisk === 'LOW' && oscillationLevel === 'LOW' && boundaryStatus === 'NO' && stabilityStatus === 'GOOD' &&
                               <span className="text-slate-600">-</span>
                             }
                           </div>

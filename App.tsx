@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Domain, DemoScenario, TelemetryPoint } from './types';
 import { DOMAIN_CONFIGS, DEMO_SCENARIOS } from './constants';
-import { generateHistoricalData } from './services/dataService';
+import { generateHistoricalData, analyzePoint } from './services/dataService';
 import { KernelConfigView } from './components/KernelConfigView';
 import { VisualizationPanel } from './components/VisualizationPanel';
 import { DataTable } from './components/DataTable';
@@ -66,6 +66,45 @@ export default function App() {
     }
     return activeScenario.primaryMetrics;
   }, [isCustomMode, customData, activeScenario]);
+
+  // Pre-calculate Analysis Data (Drift, Risk, etc.) so we can graph it
+  const analyzedData = useMemo(() => {
+    if (!displayedData.length) return [];
+
+    // Sort chronologically for analysis (just in case)
+    // Note: generateHistoricalData usually returns Newest->Oldest or reversed?
+    // Let's check generateHistoricalData: "points.push" in loop "i < sampleCount",
+    // time = now - (sampleCount - i) * intervalMs.
+    // So i=0 is oldest. i=sampleCount-1 is newest.
+    // The loop pushes oldest first. So index 0 is oldest.
+    // analyzePoint expects fullSeries and currentIndex where history is before currentIndex.
+    // So index 0 has no history. Index N has history.
+
+    // However, let's make sure we are consistent.
+    // DataService: "shortWindow = fullSeries.slice(startIndex, currentIndex + 1)"
+
+    const dataToSort = [...displayedData];
+    // If not sorted by time ascending, sort it
+    dataToSort.sort((a, b) => a.timestamp - b.timestamp);
+
+    const primaryKey = currentMetrics[0];
+    const numericSeries = dataToSort.map(d => typeof d[primaryKey] === 'number' ? d[primaryKey] : 0);
+
+    return dataToSort.map((point, idx) => {
+      const analysis = analyzePoint(numericSeries, idx);
+
+      // Map Risk to Number
+      let riskScore = 0;
+      if (analysis?.overallRisk === 'MEDIUM') riskScore = 50;
+      if (analysis?.overallRisk === 'HIGH') riskScore = 100;
+
+      return {
+        ...point,
+        ...analysis, // driftScore, stabilityScore, etc.
+        riskScore
+      };
+    });
+  }, [displayedData, currentMetrics]);
 
   const handleCustomDataGenerated = (data: TelemetryPoint[]) => {
     setCustomData(data);
@@ -180,7 +219,7 @@ export default function App() {
 
               {/* 2. Primary Visualization */}
               <VisualizationPanel
-                data={displayedData}
+                data={analyzedData}
                 scenario={isCustomMode ?
                   { ...activeScenario, title: 'Custom Generated Data', description: 'Data generated from configuration utility.' }
                   : activeScenario}
@@ -188,7 +227,7 @@ export default function App() {
 
               {/* 3. Historical Data Grid */}
               <DataTable
-                data={displayedData}
+                data={analyzedData}
                 metrics={currentMetrics}
               />
 

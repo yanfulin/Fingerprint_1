@@ -61,8 +61,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                                         setError(false);
                                     }}
                                     className={`block w-full pl-12 pr-4 py-3.5 bg-slate-950/50 border rounded-xl text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 transition-all duration-300 ${error
-                                            ? 'border-red-500/50 focus:ring-red-500/20'
-                                            : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
+                                        ? 'border-red-500/50 focus:ring-red-500/20'
+                                        : 'border-slate-800 focus:border-blue-500 focus:ring-blue-500/20'
                                         }`}
                                     placeholder="••••••••"
                                     autoFocus
