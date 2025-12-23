@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Domain, DemoScenario, TelemetryPoint } from './types';
 import { DOMAIN_CONFIGS, DEMO_SCENARIOS } from './constants';
 import { generateHistoricalData, analyzePoint } from './services/dataService';
@@ -9,7 +9,7 @@ import { LoginPage } from './components/LoginPage';
 import { DataGeneratorConfig } from './components/DataGeneratorConfig';
 import {
   Network, Radio, Zap, Home, Wifi,
-  LayoutDashboard, Server, Settings, Activity, SlidersHorizontal
+  LayoutDashboard, Server, Settings, Activity, SlidersHorizontal, Upload
 } from 'lucide-react';
 
 const DomainIcon = ({ domain, active }: { domain: Domain; active: boolean }) => {
@@ -40,6 +40,8 @@ export default function App() {
   // Custom Data State
   const [customData, setCustomData] = useState<TelemetryPoint[] | null>(null);
   const [isCustomMode, setIsCustomMode] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Set initial scenario and window defaults when domain changes
   useEffect(() => {
@@ -113,6 +115,77 @@ export default function App() {
   };
 
   const domainScenarios = DEMO_SCENARIOS.filter(s => s.domain === selectedDomain);
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const json = JSON.parse(text);
+
+        // Attempt to parse the specific format provided (Group -> Unit -> { rssi, latency, tx_err, Timeline })
+        // We will take the first unit found.
+        let rawUnitData: any = null;
+        let unitName = '';
+
+        const groups = Object.keys(json);
+        if (groups.length > 0) {
+          const firstGroup = json[groups[0]];
+          const units = Object.keys(firstGroup);
+          if (units.length > 0) {
+            unitName = units[0];
+            rawUnitData = firstGroup[unitName];
+          }
+        }
+
+        if (rawUnitData && rawUnitData.Timeline && Array.isArray(rawUnitData.Timeline)) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          const transformedData: TelemetryPoint[] = rawUnitData.Timeline.map((timeStr: string, index: number) => {
+            const [hours, minutes] = timeStr.split(':').map(Number);
+            const timestamp = new Date(today);
+            timestamp.setHours(hours, minutes, 0, 0);
+
+            // Use generic mapped values, or specific if domain matches.
+            // Using rssi -> rssi_dBm, latency -> latency_p95, tx_err -> loss_rate or retry_rate
+            return {
+              timestamp: timestamp.getTime(),
+              rssi_dBm: rawUnitData.rssi?.[index] ?? 0,
+              latency_p95: rawUnitData.latency?.[index] ?? 0,
+              loss_rate: rawUnitData.tx_err?.[index] ?? 0, // Mapping tx_err to loss_rate for visualization
+              // Add other fields if present in the raw data or leave them undefined
+            };
+          });
+
+          setCustomData(transformedData);
+          setIsCustomMode(true);
+          setCurrentView('dashboard');
+
+          // Switch to WIFI if the data looks like WIFI (RSSI present)
+          if (rawUnitData.rssi) {
+            setSelectedDomain(Domain.WIFI);
+          }
+        } else {
+          alert('Invalid JSON structure. Expected Group -> Unit -> Timeline.');
+        }
+
+      } catch (error) {
+        console.error('Error parsing JSON:', error);
+        alert('Failed to parse JSON file.');
+      }
+    };
+    reader.readAsText(file);
+    // Reset file input so the same file can be selected again if needed
+    event.target.value = '';
+  };
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={() => setIsAuthenticated(true)} />;
@@ -197,6 +270,25 @@ export default function App() {
                     ))}
                   </div>
                 )}
+
+                {/* File Import Input (Hidden) */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept=".json"
+                  className="hidden"
+                />
+
+                {/* Import Button */}
+                <button
+                  onClick={handleImportClick}
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md text-slate-300 hover:text-white hover:bg-slate-800 transition-colors border border-slate-700"
+                  title="Import JSON Data"
+                >
+                  <Upload size={14} />
+                  Import Data
+                </button>
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -219,7 +311,7 @@ export default function App() {
                   min="5" max="100"
                   value={windowShort}
                   onChange={(e) => setWindowShort(Number(e.target.value))}
-                  className="w-24 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  className="w-48 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                 />
                 <span className="text-xs text-blue-400 font-mono w-8">{windowShort}</span>
               </div>
@@ -232,7 +324,7 @@ export default function App() {
                   min="20" max="300"
                   value={windowMid}
                   onChange={(e) => setWindowMid(Number(e.target.value))}
-                  className="w-24 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  className="w-48 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                 />
                 <span className="text-xs text-indigo-400 font-mono w-8">{windowMid}</span>
               </div>
@@ -245,7 +337,7 @@ export default function App() {
                   min="300" max="10000"
                   value={windowLong}
                   onChange={(e) => setWindowLong(Number(e.target.value))}
-                  className="w-24 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  className="w-48 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
                 />
                 <span className="text-xs text-purple-400 font-mono w-10">{windowLong}</span>
               </div>
@@ -276,7 +368,12 @@ export default function App() {
               <VisualizationPanel
                 data={analyzedData}
                 scenario={isCustomMode ?
-                  { ...activeScenario, title: 'Custom Generated Data', description: 'Data generated from configuration utility.' }
+                  {
+                    ...(activeScenario || DEMO_SCENARIOS[0]),
+                    title: 'Custom Generated Data',
+                    description: 'Data imported via JSON file.',
+                    primaryMetrics: currentMetrics
+                  }
                   : activeScenario}
                 windowShort={windowShort}
                 windowMid={windowMid}
