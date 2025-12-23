@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Domain, DemoScenario, TelemetryPoint } from './types';
 import { DOMAIN_CONFIGS, DEMO_SCENARIOS } from './constants';
-import { generateHistoricalData, analyzePoint } from './services/dataService';
+import { generateHistoricalData, analyzePoint, analyzeMultiSignalPoint } from './services/dataService';
 import { KernelConfigView } from './components/KernelConfigView';
 import { VisualizationPanel } from './components/VisualizationPanel';
 import { DataTable } from './components/DataTable';
@@ -31,6 +31,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
   const [selectedDomain, setSelectedDomain] = useState<Domain>(Domain.DOCSIS);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>('');
+  const [riskMode, setRiskMode] = useState<'single' | 'multi'>('single');
 
   // Window Sizes State
   const [windowShort, setWindowShort] = useState<number>(20);
@@ -93,20 +94,23 @@ export default function App() {
 
     return dataToSort.map((point, idx) => {
       // Use state variables for window sizes
-      const analysis = analyzePoint(numericSeries, idx, windowLong, windowMid, windowShort);
+      let analysis;
+      if (riskMode === 'multi') {
+        analysis = analyzeMultiSignalPoint(dataToSort, idx, windowLong, windowMid, windowShort);
+      } else {
+        analysis = analyzePoint(dataToSort, idx, windowLong, windowMid, windowShort, primaryKey);
+      }
 
-      // Map Risk to Number
-      let riskScore = 0;
-      if (analysis?.overallRisk === 'MEDIUM') riskScore = 50;
-      if (analysis?.overallRisk === 'HIGH') riskScore = 100;
+      // Map Risk to Number (Scale 0-1.0 to 0-100)
+      const mappedRiskScore = analysis ? Math.min(100, Math.max(0, analysis.riskScore * 100)) : 0;
 
       return {
         ...point,
         ...analysis, // driftScore, stabilityScore, etc.
-        riskScore
+        riskScore: mappedRiskScore
       };
     });
-  }, [displayedData, currentMetrics, windowLong, windowMid, windowShort]); // Added dependencies
+  }, [displayedData, currentMetrics, windowLong, windowMid, windowShort, riskMode]); // Added dependencies
 
   const handleCustomDataGenerated = (data: TelemetryPoint[]) => {
     setCustomData(data);
@@ -296,50 +300,69 @@ export default function App() {
               </div>
             </div>
 
-            {/* Bottom Row: Window Settings */}
-            <div className="flex items-center gap-6 pt-2 border-t border-slate-800/50">
-              <div className="flex items-center gap-2 text-slate-400">
-                <SlidersHorizontal size={14} />
-                <span className="text-xs font-bold uppercase tracking-wider">Window Sizes</span>
+            {/* Bottom Row: Window Settings & Risk Mode */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800/50">
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-2 text-slate-400">
+                  <SlidersHorizontal size={14} />
+                  <span className="text-xs font-bold uppercase tracking-wider">Window Sizes</span>
+                </div>
+
+                {/* Short Window (20) */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 font-mono">W_SHORT:</span>
+                  <input
+                    type="range"
+                    min="5" max="100"
+                    value={windowShort}
+                    onChange={(e) => setWindowShort(Number(e.target.value))}
+                    className="w-32 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  />
+                  <span className="text-xs text-blue-400 font-mono w-8">{windowShort}</span>
+                </div>
+
+                {/* Mid Window (60) */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 font-mono">W_MID:</span>
+                  <input
+                    type="range"
+                    min="20" max="300"
+                    value={windowMid}
+                    onChange={(e) => setWindowMid(Number(e.target.value))}
+                    className="w-32 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                  <span className="text-xs text-indigo-400 font-mono w-8">{windowMid}</span>
+                </div>
+
+                {/* Long Window (720) */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 font-mono">W_LONG:</span>
+                  <input
+                    type="range"
+                    min="300" max="10000"
+                    value={windowLong}
+                    onChange={(e) => setWindowLong(Number(e.target.value))}
+                    className="w-32 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  />
+                  <span className="text-xs text-purple-400 font-mono w-10">{windowLong}</span>
+                </div>
               </div>
 
-              {/* Short Window (20) */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500 font-mono">W_SHORT:</span>
-                <input
-                  type="range"
-                  min="5" max="100"
-                  value={windowShort}
-                  onChange={(e) => setWindowShort(Number(e.target.value))}
-                  className="w-48 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                />
-                <span className="text-xs text-blue-400 font-mono w-8">{windowShort}</span>
-              </div>
-
-              {/* Mid Window (60) */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500 font-mono">W_MID:</span>
-                <input
-                  type="range"
-                  min="20" max="300"
-                  value={windowMid}
-                  onChange={(e) => setWindowMid(Number(e.target.value))}
-                  className="w-48 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                />
-                <span className="text-xs text-indigo-400 font-mono w-8">{windowMid}</span>
-              </div>
-
-              {/* Long Window (720) */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500 font-mono">W_LONG:</span>
-                <input
-                  type="range"
-                  min="300" max="10000"
-                  value={windowLong}
-                  onChange={(e) => setWindowLong(Number(e.target.value))}
-                  className="w-48 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                />
-                <span className="text-xs text-purple-400 font-mono w-10">{windowLong}</span>
+              {/* Risk Calculation Mode Toggle */}
+              <div className="flex items-center gap-3 bg-slate-800 p-1 rounded-lg">
+                <span className="text-xs text-slate-400 px-2 font-semibold">RISK MODE</span>
+                <button
+                  onClick={() => setRiskMode('single')}
+                  className={`px-3 py-1 text-xs font-medium rounded transition-all ${riskMode === 'single' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                >
+                  Single Signal
+                </button>
+                <button
+                  onClick={() => setRiskMode('multi')}
+                  className={`px-3 py-1 text-xs font-medium rounded transition-all ${riskMode === 'multi' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                >
+                  Multi-Signal
+                </button>
               </div>
             </div>
 

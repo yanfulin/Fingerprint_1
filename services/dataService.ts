@@ -224,7 +224,7 @@ export const generateHistoricalData = (scenario: DemoScenario): TelemetryPoint[]
 };
 
 // ==========================================
-// FP KERNEL MATH (Ported from Reference)
+// FP KERNEL MATH (Ported from FP_cal_v2.py)
 // ==========================================
 
 export type DriftStatus = "STABLE" | "MILD_DRIFT" | "MODERATE_DRIFT" | "SEVERE_DRIFT";
@@ -244,174 +244,312 @@ export interface KernelResult {
   meanLong: number;
   meanMid: number;
   meanShort: number;
+  k1: number;
+  k2: number;
+  k3: number;
+  k4: number;
+  riskScore: number;
+  signals?: { [key: string]: KernelResult }; // For multi-signal breakdown
 }
 
-const mean = (vals: number[]) => vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-const max = (vals: number[]) => Math.max(...vals);
-const min = (vals: number[]) => Math.min(...vals);
+const getStats = (arr: number[]) => {
+  if (arr.length === 0) return { mean: 0.0, std: 0.0 };
+  const sum = arr.reduce((a, b) => a + b, 0);
+  const mean = sum / arr.length;
+  const variance = arr.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / Math.max(arr.length - 1, 1);
+  return { mean, std: Math.sqrt(variance) };
+};
 
-// 1. Drift - Uses Long Window vs Short Window
-export const computeDrift = (longWindow: number[], shortWindow: number[], eps = 1e-6) => {
-  const muLong = mean(longWindow);
-  const muShort = mean(shortWindow);
-  const rangeLong = max(longWindow) - min(longWindow);
+// K1: Drift
+export const calculateK1Drift = (shortVals: number[], longVals: number[], eps = 1e-6): number => {
+  const { mean: sMean } = getStats(shortVals);
+  const { mean: lMean, std: lStd } = getStats(longVals);
+  return Math.abs(sMean - lMean) / (lStd + eps);
+};
 
-  // Avoid division by zero if range is 0 (flatline) using eps
-  return Math.abs(muShort - muLong) / (2 * rangeLong + eps);
+// K2: Stability
+export const calculateK2Stability = (window: number[], eps = 1e-6): number => {
+  if (window.length < 2) return 1.0;
+  const { std: stdDev } = getStats(window);
+  const rVal = Math.max(...window) - Math.min(...window);
+  const instability = stdDev / (rVal + eps);
+  return 1.0 - Math.min(1.0, instability);
+};
+
+// K3: Boundary
+export const calculateK3Boundary = (
+  values: number[],
+  minVal: number | null,
+  maxVal: number | null,
+  maxDerivative: number | null
+): number => {
+  if (values.length === 0) return 0;
+
+  let hits = 0;
+  let prev: number | null = null;
+
+  for (const v of values) {
+    let violated = false;
+    if (minVal !== null && v < minVal) violated = true;
+    if (maxVal !== null && v > maxVal) violated = true;
+
+    if (prev !== null && maxDerivative !== null) {
+      if (Math.abs(v - prev) > maxDerivative) violated = true;
+    }
+
+    if (violated) hits++;
+    prev = v;
+  }
+  return hits;
+};
+
+// K4: Oscillation
+export const calculateK4OscillationDynamic = (shortWindow: number[], longWindow: number[]): number => {
+  if (shortWindow.length < 2 || longWindow.length === 0) return 0.0;
+
+  const { mean: muRef } = getStats(longWindow);
+  const states = shortWindow.map(v => v > muRef ? 1 : 0);
+
+  let switches = 0;
+  for (let i = 1; i < states.length; i++) {
+    if (states[i] !== states[i - 1]) switches++;
+  }
+
+  const maxSwitches = states.length - 1;
+  return maxSwitches > 0 ? switches / maxSwitches : 0.0;
+};
+
+// Risk Formula
+export const calculateRiskScore = (
+  k1_rssi: number, k1_latency: number, k1_txerr: number,
+  k2_rssi: number, k2_latency: number, k2_txerr: number,
+  k3_latency: number,
+  k4_latency: number, k4_txerr: number
+): number => {
+  return (0.3 * (1 - k2_rssi)
+    + 0.3 * (1 - k2_latency)
+    + 0.1 * (1 - k2_txerr)
+    + 0.05 * (k1_rssi + k1_latency + k1_txerr)
+    + 0.05 * (k4_latency + k4_txerr)
+    + 0.02 * k3_latency);
 };
 
 export const judgeDrift = (score: number): DriftStatus => {
-  if (score < 0.05) return "STABLE";
-  if (score < 0.15) return "MILD_DRIFT";
-  if (score < 0.30) return "MODERATE_DRIFT";
+  if (score < 1.0) return "STABLE";
+  if (score < 2.0) return "MILD_DRIFT";
+  if (score < 3.0) return "MODERATE_DRIFT";
   return "SEVERE_DRIFT";
 };
 
-// 2. Stability - Uses Mid Window
-export const computeStability = (midWindow: number[], eps = 1e-6) => {
-  if (midWindow.length < 2) return 0.0;
-  const mu = mean(midWindow);
-  const variance = midWindow.reduce((acc, val) => acc + Math.pow(val - mu, 2), 0) / midWindow.length;
-  const sigma = Math.sqrt(variance);
-  const rng = max(midWindow) - min(midWindow);
-
-  return sigma / (3 * rng + eps);
-};
-
-export const judgeStability = (score: number): StabilityStatus => {
-  if (score < 0.08) return "GOOD";
-  if (score < 0.20) return "MARGINAL";
+export const judgeStability = (k2_score: number): StabilityStatus => {
+  if (k2_score > 0.9) return "GOOD";
+  if (k2_score > 0.7) return "MARGINAL";
   return "UNSTABLE";
 };
 
-// 3. Boundary - Uses Mid Window
-export const computeBoundaryHit = (vals: number[], threshold = 30.0, margin = 20.0): BoundaryStatus => {
-  const maxVal = max(vals);
-  if (maxVal > threshold) return "YES";
-  if (maxVal > margin) return "WARNING";
-  return "NO";
-};
-
-// 4. Oscillation - Uses Short Window
-export const computeOscillation = (vals: number[]): OscillationLevel => {
-  if (vals.length < 3) return "LOW";
-
-  const diffs: number[] = [];
-  for (let i = 0; i < vals.length - 1; i++) {
-    diffs.push(vals[i + 1] - vals[i]);
-  }
-
-  const sign = (x: number) => x > 0 ? 1 : (x < 0 ? -1 : 0);
-  const signs = diffs.map(sign).filter(s => s !== 0);
-
-  if (signs.length < 2) return "LOW";
-
-  let changes = 0;
-  for (let i = 0; i < signs.length - 1; i++) {
-    if (signs[i] * signs[i + 1] < 0) changes++;
-  }
-
-  if (changes === 0) return "LOW";
-  if (changes <= 2) return "MEDIUM";
+export const judgeOscillation = (k4_score: number): OscillationLevel => {
+  if (k4_score < 0.2) return "LOW";
+  if (k4_score < 0.5) return "MEDIUM";
   return "HIGH";
 };
 
-// 5. Overall Risk
-export const computeRisk = (
-  driftScore: number,
-  stability: StabilityStatus,
-  boundary: BoundaryStatus,
-  oscillation: OscillationLevel
-): RiskLevel => {
-  let score = 0;
-
-  if (boundary === "YES") score += 2;
-  else if (boundary === "WARNING") score += 1;
-
-  if (driftScore > 0.30) score += 2;
-  else if (driftScore > 0.15) score += 1;
-
-  if (stability === "UNSTABLE") score += 2;
-  else if (stability === "MARGINAL") score += 1;
-
-  if (oscillation === "HIGH") score += 2;
-  else if (oscillation === "MEDIUM") score += 1;
-
-  if (score <= 2) return "LOW";
-  if (score <= 4) return "MEDIUM";
-  return "HIGH";
-};
 
 /**
  * Main Analysis Function
  * Calculates metrics for a specific point in time by looking at the windows ending at that point.
  */
 export const analyzePoint = (
-  fullSeries: number[],
+  fullData: TelemetryPoint[] | number[],
+  currentIndex: number,
+  longSize: number = 720,
+  midSize: number = 60,
+  shortSize: number = 20,
+  primaryKey: string = 'rssi_dBm'
+): KernelResult | null => {
+
+  let rssiSeries: number[] = [];
+  let latencySeries: number[] = [];
+  let txErrSeries: number[] = [];
+
+  const isObjectArray = fullData.length > 0 && typeof fullData[0] === 'object';
+
+  if (isObjectArray) {
+    const data = fullData as TelemetryPoint[];
+    // Map required fields for Risk Calc
+    rssiSeries = data.map(d => d.rssi_dBm ?? (d as any).rx_power_dBm ?? (d as any).rsrp_dBm ?? -60);
+    latencySeries = data.map(d => d.latency_p95 ?? 20);
+    txErrSeries = data.map(d => d.loss_rate ?? d.retry_rate ?? 0);
+  } else {
+    // Fallback: Use the provided series for all
+    const data = fullData as number[];
+    rssiSeries = data;
+    latencySeries = data;
+    txErrSeries = data.map(_ => 0);
+  }
+
+  // Determine current active series
+  let targetSeries = rssiSeries;
+  if (primaryKey.includes('latency')) targetSeries = latencySeries;
+  else if (primaryKey.includes('loss') || primaryKey.includes('err') || primaryKey.includes('retry')) targetSeries = txErrSeries;
+  else if (!isObjectArray) targetSeries = fullData as number[];
+
+
+  // Basic validation
+  if (currentIndex < 0 || currentIndex >= targetSeries.length) return null;
+  if (currentIndex < shortSize) return null;
+
+  // Helper to extract windows
+  const getWindows = (series: number[]) => {
+    const longStart = Math.max(0, currentIndex - longSize + 1);
+    const midStart = Math.max(0, currentIndex - midSize + 1);
+    const shortStart = Math.max(0, currentIndex - shortSize + 1);
+    return {
+      long: series.slice(longStart, currentIndex + 1),
+      mid: series.slice(midStart, currentIndex + 1),
+      short: series.slice(shortStart, currentIndex + 1),
+      current: series.slice(currentIndex, currentIndex + 1)
+    };
+  };
+
+  const wRssi = getWindows(rssiSeries);
+  const wLat = getWindows(latencySeries);
+  const wTx = getWindows(txErrSeries);
+
+  // Calculate K1 (Drift)
+  const k1_rssi = calculateK1Drift(wRssi.short, wRssi.long);
+  const k1_lat = calculateK1Drift(wLat.short, wLat.long);
+  const k1_tx = calculateK1Drift(wTx.short, wTx.long);
+
+  // Calculate K2 (Stability)
+  const k2_rssi = calculateK2Stability(wRssi.mid);
+  const k2_lat = calculateK2Stability(wLat.mid);
+  const k2_tx = calculateK2Stability(wTx.mid);
+
+  // Calculate K3 (Boundary) - Latency Only in risk formula, but we compute generic
+  const hits_lat = calculateK3Boundary(wLat.current, 0, 70, 30);
+
+  // Calculate K4 (Oscillation)
+  const k4_rssi = calculateK4OscillationDynamic(wRssi.short, wRssi.long);
+  // Risk formula uses k4_latency and k4_txerr
+  const k4_lat = calculateK4OscillationDynamic(wLat.short, wLat.long);
+  const k4_tx = calculateK4OscillationDynamic(wTx.short, wTx.long);
+
+  // Total Risk
+  const riskScoreRaw = calculateRiskScore(
+    k1_rssi, k1_lat, k1_tx,
+    k2_rssi, k2_lat, k2_tx,
+    hits_lat,
+    k4_lat, k4_tx
+  );
+
+  // Normalize Risk to RiskLevel (Simple Thresholds based on typical outputs)
+  let overallRisk: RiskLevel = "LOW";
+  if (riskScoreRaw > 0.8) overallRisk = "HIGH";
+  else if (riskScoreRaw > 0.4) overallRisk = "MEDIUM";
+
+  // Determine K-values for the TARGET series (for individual metric charts)
+  const targetWindows = getWindows(targetSeries);
+  const driftScore = calculateK1Drift(targetWindows.short, targetWindows.long);
+  const stabilityScore = calculateK2Stability(targetWindows.mid);
+  const oscillationVal = calculateK4OscillationDynamic(targetWindows.short, targetWindows.long);
+  const boundaryHits = calculateK3Boundary(targetWindows.current, null, 30, 20);
+
+  const meanLong = getStats(targetWindows.long).mean;
+  const meanMid = getStats(targetWindows.mid).mean;
+  const meanShort = getStats(targetWindows.short).mean;
+
+  return {
+    driftScore,
+    driftStatus: judgeDrift(driftScore),
+    stabilityScore,
+    stabilityStatus: judgeStability(stabilityScore),
+    boundaryStatus: boundaryHits > 0 ? "YES" : "NO",
+    oscillationLevel: judgeOscillation(oscillationVal),
+    overallRisk,
+    meanLong,
+    meanMid,
+    meanShort,
+    k1: driftScore,
+    k2: stabilityScore,
+    k3: boundaryHits,
+    k4: oscillationVal,
+    riskScore: riskScoreRaw
+  };
+};
+
+/**
+ * Multi-Signal Analysis Function
+ * Computes risk based on specific formula involving RSSI, Latency, and TxErr.
+ */
+export const analyzeMultiSignalPoint = (
+  fullData: TelemetryPoint[],
   currentIndex: number,
   longSize: number = 720,
   midSize: number = 60,
   shortSize: number = 20
 ): KernelResult | null => {
-  // Basic validation
-  if (currentIndex < 0 || currentIndex >= fullSeries.length) return null;
-  // We need enough data for at least the short window to start analysis
-  // But ideally we want to see if we have enough for Long/Mid too
-  // If we don't have enough for Long, we can't compute drift accurately compared to full history
-  // But let's fallback: use available data up to start?
-  // For strict windowing implementation:
+  // Use existing analyzePoint to get metrics for each signal
+  // Pass 'rssi_dBm', 'latency_p95', 'loss_rate' as primary keys to target specific signals
 
-  if (currentIndex < shortSize) return null; // Can't even do short window
+  // 1. Analyze RSSI
+  const resRssi = analyzePoint(fullData, currentIndex, longSize, midSize, shortSize, 'rssi_dBm');
 
-  // Define Windows (Ending at currentIndex)
+  // 2. Analyze Latency
+  const resLat = analyzePoint(fullData, currentIndex, longSize, midSize, shortSize, 'latency_p95');
 
-  // 1. Long Window (Drift)
-  // Logic: W_long is the baseline window. We use [Current - Long, Current].
-  const longStart = Math.max(0, currentIndex - longSize + 1);
-  const longWindow = fullSeries.slice(longStart, currentIndex + 1);
+  // 3. Analyze TxErr (Loss)
+  const resTx = analyzePoint(fullData, currentIndex, longSize, midSize, shortSize, 'loss_rate');
 
-  // 2. Mid Window (Stability / Boundary)
-  const midStart = Math.max(0, currentIndex - midSize + 1);
-  const midWindow = fullSeries.slice(midStart, currentIndex + 1);
+  if (!resRssi || !resLat || !resTx) return null;
 
-  // 3. Short Window (Oscillation)
-  const shortStart = Math.max(0, currentIndex - shortSize + 1);
-  const shortWindow = fullSeries.slice(shortStart, currentIndex + 1);
+  // 4. Compute Combined Risk Score
+  const k1_rssi = resRssi.k1;
+  const k2_rssi = resRssi.k2;
+  // k3_rssi not used in formula
+  // k4_rssi not used in formula (but calculated)
 
-  // Compute Metrics
-  const driftScore = computeDrift(longWindow, shortWindow);
-  const driftStatus = judgeDrift(driftScore);
+  const k1_lat = resLat.k1;
+  const k2_lat = resLat.k2;
+  const k3_lat = resLat.k3;
+  const k4_lat = resLat.k4;
 
-  const stabilityScore = computeStability(midWindow); // Use Mid Window
-  const stabilityStatus = judgeStability(stabilityScore);
+  const k1_tx = resTx.k1;
+  const k2_tx = resTx.k2;
+  // k3_tx not used
+  const k4_tx = resTx.k4;
 
-  // Note: Thresholds strictly from prompt default (30, 20). 
-  // In production, pass these in via config.
-  const boundaryStatus = computeBoundaryHit(midWindow, 30.0, 20.0); // Use Mid Window
+  const riskScoreRaw = calculateRiskScore(
+    k1_rssi, k1_lat, k1_tx,
+    k2_rssi, k2_lat, k2_tx,
+    k3_lat,
+    k4_lat, k4_tx
+  );
 
-  const oscillationLevel = computeOscillation(shortWindow); // Use Short Window
-
-  const overallRisk = computeRisk(driftScore, stabilityStatus, boundaryStatus, oscillationLevel);
-
-  // Calculate Rolling Averages for Visualization
-  const meanLong = mean(longWindow);
-  const meanMid = mean(midWindow);
-  const meanShort = mean(shortWindow);
+  let overallRisk: RiskLevel = "LOW";
+  if (riskScoreRaw > 0.8) overallRisk = "HIGH";
+  else if (riskScoreRaw > 0.4) overallRisk = "MEDIUM";
 
   return {
-    driftScore,
-    driftStatus,
-    stabilityScore,
-    stabilityStatus,
-    boundaryStatus,
-    oscillationLevel,
+    // Top-level stats can just be from the "primary" or maybe average? 
+    // Usually usage expects a single set of numbers for the main view if not handling 'signals' property.
+    // We will assume the UI handles 'signals' if present.
+    // For safety, let's put RSSI as default top level or just zeros?
+    // Let's copy RSSI as the "Main" abstract if something blindly reads it, 
+    // but overwrite riskScore and overallRisk.
+    ...resRssi,
+    driftScore: (resRssi.driftScore + resLat.driftScore + resTx.driftScore) / 3, // Avg for summary
+    stabilityScore: (resRssi.stabilityScore + resLat.stabilityScore + resTx.stabilityScore) / 3,
+
     overallRisk,
-    meanLong,
-    meanMid,
-    meanShort
+    riskScore: riskScoreRaw,
+
+    signals: {
+      'RSSI': resRssi,
+      'Latency': resLat,
+      'TxErr': resTx
+    }
   };
 };
-
 
 // --- Flexible Data Generator ---
 
