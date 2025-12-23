@@ -38,6 +38,11 @@ export default function App() {
   const [windowMid, setWindowMid] = useState<number>(60);
   const [windowLong, setWindowLong] = useState<number>(720);
 
+  // Temporary state for sliders to prevent heavy recalculation while dragging
+  const [tempWindowShort, setTempWindowShort] = useState<number>(20);
+  const [tempWindowMid, setTempWindowMid] = useState<number>(60);
+  const [tempWindowLong, setTempWindowLong] = useState<number>(720);
+
   // Custom Data State
   const [customData, setCustomData] = useState<TelemetryPoint[] | null>(null);
   const [isCustomMode, setIsCustomMode] = useState(false);
@@ -55,9 +60,17 @@ export default function App() {
 
     // Reset window sizes to domain defaults
     const config = DOMAIN_CONFIGS[selectedDomain];
-    setWindowShort(config.drift.short_window_samples || 20);
-    setWindowMid(config.stability.window_samples || 60);
-    setWindowLong(config.drift.long_window_samples || 720);
+    const defShort = config.drift.short_window_samples || 20;
+    const defMid = config.stability.window_samples || 60;
+    const defLong = config.drift.long_window_samples || 720;
+
+    setWindowShort(defShort);
+    setWindowMid(defMid);
+    setWindowLong(defLong);
+
+    setTempWindowShort(defShort);
+    setTempWindowMid(defMid);
+    setTempWindowLong(defLong);
   }, [selectedDomain, isCustomMode]);
 
   const activeScenario = useMemo(() =>
@@ -314,11 +327,20 @@ export default function App() {
                   <input
                     type="range"
                     min="5" max="100"
-                    value={windowShort}
-                    onChange={(e) => setWindowShort(Number(e.target.value))}
+                    value={tempWindowShort}
+                    onChange={(e) => setTempWindowShort(Number(e.target.value))}
+                    onMouseUp={() => setWindowShort(tempWindowShort)}
+                    onTouchEnd={() => setWindowShort(tempWindowShort)}
                     className="w-32 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                   />
-                  <span className="text-xs text-blue-400 font-mono w-8">{windowShort}</span>
+                  <input
+                    type="number"
+                    value={tempWindowShort}
+                    onChange={(e) => setTempWindowShort(Number(e.target.value))}
+                    onBlur={() => setWindowShort(tempWindowShort)}
+                    onKeyDown={(e) => e.key === 'Enter' && setWindowShort(tempWindowShort)}
+                    className="text-xs text-blue-400 font-mono w-12 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 focus:border-blue-500 focus:outline-none text-center"
+                  />
                 </div>
 
                 {/* Mid Window (60) */}
@@ -327,11 +349,20 @@ export default function App() {
                   <input
                     type="range"
                     min="20" max="300"
-                    value={windowMid}
-                    onChange={(e) => setWindowMid(Number(e.target.value))}
+                    value={tempWindowMid}
+                    onChange={(e) => setTempWindowMid(Number(e.target.value))}
+                    onMouseUp={() => setWindowMid(tempWindowMid)}
+                    onTouchEnd={() => setWindowMid(tempWindowMid)}
                     className="w-32 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                   />
-                  <span className="text-xs text-indigo-400 font-mono w-8">{windowMid}</span>
+                  <input
+                    type="number"
+                    value={tempWindowMid}
+                    onChange={(e) => setTempWindowMid(Number(e.target.value))}
+                    onBlur={() => setWindowMid(tempWindowMid)}
+                    onKeyDown={(e) => e.key === 'Enter' && setWindowMid(tempWindowMid)}
+                    className="text-xs text-indigo-400 font-mono w-12 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 focus:border-indigo-500 focus:outline-none text-center"
+                  />
                 </div>
 
                 {/* Long Window (720) */}
@@ -340,11 +371,20 @@ export default function App() {
                   <input
                     type="range"
                     min="300" max="10000"
-                    value={windowLong}
-                    onChange={(e) => setWindowLong(Number(e.target.value))}
+                    value={tempWindowLong}
+                    onChange={(e) => setTempWindowLong(Number(e.target.value))}
+                    onMouseUp={() => setWindowLong(tempWindowLong)}
+                    onTouchEnd={() => setWindowLong(tempWindowLong)}
                     className="w-32 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
                   />
-                  <span className="text-xs text-purple-400 font-mono w-10">{windowLong}</span>
+                  <input
+                    type="number"
+                    value={tempWindowLong}
+                    onChange={(e) => setTempWindowLong(Number(e.target.value))}
+                    onBlur={() => setWindowLong(tempWindowLong)}
+                    onKeyDown={(e) => e.key === 'Enter' && setWindowLong(tempWindowLong)}
+                    className="text-xs text-purple-400 font-mono w-14 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 focus:border-purple-500 focus:outline-none text-center"
+                  />
                 </div>
               </div>
 

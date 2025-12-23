@@ -46,10 +46,10 @@ const SignalAnalysisRow = ({ title, data, color, windowShort, windowMid, windowL
       </h3>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {/* 1. Raw Signal & Windows */}
+        {/* 1. Raw Signal */}
         <div className="bg-slate-900/50 rounded border border-slate-700/50 p-2 xl:col-span-2">
-          <h4 className="text-[10px] text-slate-500 uppercase font-mono mb-2">Signal & Weighted Windows</h4>
-          <div className="h-[200px] w-full">
+          <h4 className="text-[10px] text-slate-500 uppercase font-mono mb-2">Raw Signal</h4>
+          <div className="h-[180px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data} syncId="multiSync">
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} vertical={false} />
@@ -58,6 +58,22 @@ const SignalAnalysisRow = ({ title, data, color, windowShort, windowMid, windowL
                 <Tooltip content={<CustomTooltip />} />
                 <Legend iconType="circle" />
                 <Line type="monotone" dataKey="raw" stroke={color} strokeWidth={2} dot={false} name="Raw Signal" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* 2. Weighted Windows */}
+        <div className="bg-slate-900/50 rounded border border-slate-700/50 p-2 xl:col-span-2">
+          <h4 className="text-[10px] text-slate-500 uppercase font-mono mb-2">Weighted Moving Averages</h4>
+          <div className="h-[180px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={data} syncId="multiSync">
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} vertical={false} />
+                <XAxis dataKey="timestamp" tickFormatter={(t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} stroke="#64748b" tick={{ fontSize: 10 }} />
+                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={['auto', 'auto']} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend iconType="circle" />
                 <Line type="monotone" dataKey="meanShort" stroke="#f472b6" strokeWidth={1} dot={false} name={`Short (N=${windowShort})`} />
                 <Line type="monotone" dataKey="meanMid" stroke="#818cf8" strokeWidth={1} dot={false} name={`Mid (N=${windowMid})`} />
                 <Line type="monotone" dataKey="meanLong" stroke="#fbbf24" strokeWidth={1} strokeDasharray="5 5" dot={false} name={`Long (N=${windowLong})`} />
@@ -143,6 +159,16 @@ export const VisualizationPanel: React.FC<Props> = ({ data, scenario, windowShor
 
   const [hiddenMetrics, setHiddenMetrics] = useState<Set<string>>(new Set());
 
+  const brushProps = {
+    dataKey: "timestamp",
+    height: 30,
+    stroke: "#475569",
+    fill: "#1e293b",
+    tickFormatter: (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    travellerWidth: 10,
+    tick: { fontSize: 10, fill: "#94a3b8" }
+  };
+
   // --- MULTI SIGNAL DATA PREP ---
   const multiSignalData = useMemo(() => {
     if (!isMultiSignal) return null;
@@ -222,14 +248,22 @@ export const VisualizationPanel: React.FC<Props> = ({ data, scenario, windowShor
         {/* Global Risk */}
         <div className="mb-8 p-4 bg-slate-900 rounded border border-slate-800">
           <h3 className="text-xs font-bold text-red-500 uppercase mb-2">Overall Risk Score (Weighted)</h3>
-          <div className="h-[100px]">
+          <div className="h-[200px]">
             <ResponsiveContainer>
               <AreaChart data={multiSignalData.overall} syncId="multiSync">
-                <XAxis dataKey="timestamp" hide />
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} vertical={false} />
+                <XAxis
+                  dataKey="timestamp"
+                  tickFormatter={(t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  stroke="#64748b"
+                  tick={{ fontSize: 10 }}
+                  minTickGap={30}
+                />
                 <YAxis domain={[0, 1.2]} hide />
                 <Tooltip content={<CustomTooltip />} />
                 <Area type="monotone" dataKey="riskScore" stroke="#ef4444" fill="#ef4444" fillOpacity={0.2} strokeWidth={2} name="Total Risk" />
                 <ReferenceLine y={0.8} stroke="#ef4444" strokeDasharray="3 3" />
+                <Brush {...brushProps} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -276,15 +310,7 @@ export const VisualizationPanel: React.FC<Props> = ({ data, scenario, windowShor
   };
 
   const isOscillation = scenario.kernelFocus === 'oscillation';
-  const brushProps = {
-    dataKey: "timestamp",
-    height: 30,
-    stroke: "#475569",
-    fill: "#1e293b",
-    tickFormatter: (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    travellerWidth: 10,
-    tick: { fontSize: 10, fill: "#94a3b8" }
-  };
+
 
   return (
     <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-6 mb-6 shadow-sm">
