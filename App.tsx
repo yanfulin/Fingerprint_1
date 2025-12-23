@@ -9,7 +9,7 @@ import { LoginPage } from './components/LoginPage';
 import { DataGeneratorConfig } from './components/DataGeneratorConfig';
 import {
   Network, Radio, Zap, Home, Wifi,
-  LayoutDashboard, Server, Settings, Activity
+  LayoutDashboard, Server, Settings, Activity, SlidersHorizontal
 } from 'lucide-react';
 
 const DomainIcon = ({ domain, active }: { domain: Domain; active: boolean }) => {
@@ -19,7 +19,7 @@ const DomainIcon = ({ domain, active }: { domain: Domain; active: boolean }) => 
     case Domain.DOCSIS: return <Server className={color} size={18} />;
     case Domain.FWA: return <Radio className={color} size={18} />;
     case Domain.MDU: return <Home className={color} size={18} />;
-    case Domain.MESH: return <Wifi className={color} size={18} />;
+    case Domain.WIFI: return <Wifi className={color} size={18} />;
     default: return <Activity className={color} size={18} />;
   }
 };
@@ -27,16 +27,21 @@ const DomainIcon = ({ domain, active }: { domain: Domain; active: boolean }) => 
 type ViewMode = 'dashboard' | 'config';
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
-  const [selectedDomain, setSelectedDomain] = useState<Domain>(Domain.PON);
+  const [selectedDomain, setSelectedDomain] = useState<Domain>(Domain.DOCSIS);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>('');
+
+  // Window Sizes State
+  const [windowShort, setWindowShort] = useState<number>(20);
+  const [windowMid, setWindowMid] = useState<number>(60);
+  const [windowLong, setWindowLong] = useState<number>(720);
 
   // Custom Data State
   const [customData, setCustomData] = useState<TelemetryPoint[] | null>(null);
   const [isCustomMode, setIsCustomMode] = useState(false);
 
-  // Set initial scenario when domain changes
+  // Set initial scenario and window defaults when domain changes
   useEffect(() => {
     if (!isCustomMode) {
       const firstScenario = DEMO_SCENARIOS.find(s => s.domain === selectedDomain);
@@ -44,6 +49,12 @@ export default function App() {
         setSelectedScenarioId(firstScenario.id);
       }
     }
+
+    // Reset window sizes to domain defaults
+    const config = DOMAIN_CONFIGS[selectedDomain];
+    setWindowShort(config.drift.short_window_samples || 20);
+    setWindowMid(config.stability.window_samples || 60);
+    setWindowLong(config.drift.long_window_samples || 720);
   }, [selectedDomain, isCustomMode]);
 
   const activeScenario = useMemo(() =>
@@ -71,18 +82,6 @@ export default function App() {
   const analyzedData = useMemo(() => {
     if (!displayedData.length) return [];
 
-    // Sort chronologically for analysis (just in case)
-    // Note: generateHistoricalData usually returns Newest->Oldest or reversed?
-    // Let's check generateHistoricalData: "points.push" in loop "i < sampleCount",
-    // time = now - (sampleCount - i) * intervalMs.
-    // So i=0 is oldest. i=sampleCount-1 is newest.
-    // The loop pushes oldest first. So index 0 is oldest.
-    // analyzePoint expects fullSeries and currentIndex where history is before currentIndex.
-    // So index 0 has no history. Index N has history.
-
-    // However, let's make sure we are consistent.
-    // DataService: "shortWindow = fullSeries.slice(startIndex, currentIndex + 1)"
-
     const dataToSort = [...displayedData];
     // If not sorted by time ascending, sort it
     dataToSort.sort((a, b) => a.timestamp - b.timestamp);
@@ -91,7 +90,8 @@ export default function App() {
     const numericSeries = dataToSort.map(d => typeof d[primaryKey] === 'number' ? d[primaryKey] : 0);
 
     return dataToSort.map((point, idx) => {
-      const analysis = analyzePoint(numericSeries, idx);
+      // Use state variables for window sizes
+      const analysis = analyzePoint(numericSeries, idx, windowLong, windowMid, windowShort);
 
       // Map Risk to Number
       let riskScore = 0;
@@ -104,7 +104,7 @@ export default function App() {
         riskScore
       };
     });
-  }, [displayedData, currentMetrics]);
+  }, [displayedData, currentMetrics, windowLong, windowMid, windowShort]); // Added dependencies
 
   const handleCustomDataGenerated = (data: TelemetryPoint[]) => {
     setCustomData(data);
@@ -133,7 +133,7 @@ export default function App() {
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           <div className="text-xs font-semibold text-slate-500 uppercase mb-3 ml-2">Domains</div>
-          {Object.values(Domain).map((d) => (
+          {([Domain.DOCSIS, Domain.WIFI, Domain.PON, Domain.FWA, Domain.MDU]).map((d) => (
             <button
               key={d}
               onClick={() => {
@@ -169,36 +169,88 @@ export default function App() {
 
         {/* Top Header / Scenario Selector (Only show in dashboard) */}
         {currentView === 'dashboard' && (
-          <header className="h-16 border-b border-slate-800 bg-slate-900/50 backdrop-blur flex items-center px-6 justify-between">
-            <div className="flex items-center gap-4">
-              <span className="text-slate-400 text-sm font-mono">SCENARIO:</span>
+          <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur flex flex-col gap-4 py-4 px-6">
 
-              {isCustomMode ? (
-                <div className="bg-purple-900/30 text-purple-200 border border-purple-800 px-3 py-1 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-2">
-                  <Activity size={14} /> Custom Generator Data
-                  <button onClick={() => setIsCustomMode(false)} className="ml-2 hover:text-white text-purple-400">✕</button>
-                </div>
-              ) : (
-                <div className="flex bg-slate-800 rounded-lg p-1">
-                  {domainScenarios.map(sc => (
-                    <button
-                      key={sc.id}
-                      onClick={() => setSelectedScenarioId(sc.id)}
-                      className={`px-4 py-1.5 text-xs font-medium rounded-md transition-all ${selectedScenarioId === sc.id
-                        ? 'bg-slate-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200'
-                        }`}
-                    >
-                      {sc.title}
-                    </button>
-                  ))}
-                </div>
-              )}
+            {/* Top Row: Scenarios & Status */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <span className="text-slate-400 text-sm font-mono">SCENARIO:</span>
+
+                {isCustomMode ? (
+                  <div className="bg-purple-900/30 text-purple-200 border border-purple-800 px-3 py-1 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-2">
+                    <Activity size={14} /> Custom Generator Data
+                    <button onClick={() => setIsCustomMode(false)} className="ml-2 hover:text-white text-purple-400">✕</button>
+                  </div>
+                ) : (
+                  <div className="flex bg-slate-800 rounded-lg p-1">
+                    {domainScenarios.map(sc => (
+                      <button
+                        key={sc.id}
+                        onClick={() => setSelectedScenarioId(sc.id)}
+                        className={`px-4 py-1.5 text-xs font-medium rounded-md transition-all ${selectedScenarioId === sc.id
+                          ? 'bg-slate-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                      >
+                        {sc.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className="text-xs text-emerald-400 font-mono">LIVE CONNECTED</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span className="text-xs text-emerald-400 font-mono">LIVE CONNECTED</span>
+
+            {/* Bottom Row: Window Settings */}
+            <div className="flex items-center gap-6 pt-2 border-t border-slate-800/50">
+              <div className="flex items-center gap-2 text-slate-400">
+                <SlidersHorizontal size={14} />
+                <span className="text-xs font-bold uppercase tracking-wider">Window Sizes</span>
+              </div>
+
+              {/* Short Window (20) */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-mono">W_SHORT:</span>
+                <input
+                  type="range"
+                  min="5" max="100"
+                  value={windowShort}
+                  onChange={(e) => setWindowShort(Number(e.target.value))}
+                  className="w-24 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                />
+                <span className="text-xs text-blue-400 font-mono w-8">{windowShort}</span>
+              </div>
+
+              {/* Mid Window (60) */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-mono">W_MID:</span>
+                <input
+                  type="range"
+                  min="20" max="300"
+                  value={windowMid}
+                  onChange={(e) => setWindowMid(Number(e.target.value))}
+                  className="w-24 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                />
+                <span className="text-xs text-indigo-400 font-mono w-8">{windowMid}</span>
+              </div>
+
+              {/* Long Window (720) */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-mono">W_LONG:</span>
+                <input
+                  type="range"
+                  min="300" max="10000"
+                  value={windowLong}
+                  onChange={(e) => setWindowLong(Number(e.target.value))}
+                  className="w-24 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                />
+                <span className="text-xs text-purple-400 font-mono w-10">{windowLong}</span>
+              </div>
             </div>
+
           </header>
         )}
 
@@ -214,6 +266,9 @@ export default function App() {
                 <KernelConfigView
                   config={DOMAIN_CONFIGS[selectedDomain]}
                   domain={selectedDomain}
+                  overrideShort={windowShort}
+                  overrideMid={windowMid}
+                  overrideLong={windowLong}
                 />
               )}
 
@@ -223,6 +278,9 @@ export default function App() {
                 scenario={isCustomMode ?
                   { ...activeScenario, title: 'Custom Generated Data', description: 'Data generated from configuration utility.' }
                   : activeScenario}
+                windowShort={windowShort}
+                windowMid={windowMid}
+                windowLong={windowLong}
               />
 
               {/* 3. Historical Data Grid */}
